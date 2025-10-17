@@ -996,7 +996,7 @@ def lookup_hp_serial_number():
 
 @app.route('/', methods=['GET'])
 def home():
-    return "Inventory Lookup API is running. Endpoints: /lookup/dell?tag=<DELL_TAG>, /lookup/hp?tag=<HP_SERIAL>, /lookup/viewsonic?tag=<VIEWSONIC_SERIAL>, /lookup/juniper?tag=<JUNIPER_SERIAL>, /lookup/cyberpower?tag=<CYBERPOWER_SERIAL>, /lookup/brother?tag=<BROTHER_SERIAL>, /lookup/apple?tag=<APPLE_SERIAL>, /lookup/acer?tag=<ACER_SERIAL>, /lookup/lenovo?tag=<LENOVO_SERIAL>, /lookup/cisco?tag=<CISCO_SERIAL>, /lookup/apc?tag=<APC_SERIAL>, /lookup/microsoft?tag=<MICROSOFT_SERIAL>, /lookup/samsung?tag=<SAMSUNG_SERIAL>, /lookup/vizio?tag=<VIZIO_SERIAL>, and /lookup/tcl?tag=<TCL_SERIAL>""
+    return "Inventory Lookup API is running. Endpoints: /lookup/dell?tag=<DELL_TAG>, /lookup/hp?tag=<HP_SERIAL>, /lookup/viewsonic?tag=<VIEWSONIC_SERIAL>, /lookup/juniper?tag=<JUNIPER_SERIAL>, /lookup/cyberpower?tag=<CYBERPOWER_SERIAL>, /lookup/brother?tag=<BROTHER_SERIAL>, /lookup/apple?tag=<APPLE_SERIAL>, /lookup/acer?tag=<ACER_SERIAL>, /lookup/lenovo?tag=<LENOVO_SERIAL>, /lookup/cisco?tag=<CISCO_SERIAL>, /lookup/apc?tag=<APC_SERIAL>, /lookup/microsoft?tag=<MICROSOFT_SERIAL>, /lookup/samsung?tag=<SAMSUNG_SERIAL>, /lookup/vizio?tag=<VIZIO_SERIAL>, and /lookup/tcl?tag=<TCL_SERIAL>"
 
 if __name__ == '__main__':
     # Use environment variable for port, common in hosting environments
