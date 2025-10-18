@@ -1,7 +1,9 @@
 Flask
 requests
 beautifulsoup4
-Flask-Session
-requests-oauthlib
-google-auth-oauthlib
+Flask-Cors
 gunicorn
+requests_oauthlib
+google-auth-oauthlib
+Flask-Session
+
