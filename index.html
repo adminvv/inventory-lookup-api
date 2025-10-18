@@ -8,15 +8,32 @@
   <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
 <body class="bg-gray-50">
+
+  <script>
+    // Check if the user is logged in. If not, redirect to the Flask server's login route.
+    // The Flask server will handle the Google SSO process and only serve the full
+    // application content upon successful authentication.
+    if (!document.cookie.includes('session')) {
+      // Assuming the Flask server is on the same domain, redirect to the login route.
+      // The Flask server will handle the redirect to Google's OAuth endpoint.
+      window.location.href = '/login';
+    }
+  </script>
+
   <div id="app"></div>
 
   <script>
+    // Refactored into a modular IIFE to prevent global namespace pollution
+    (function() {
+
     // State management
     let state = {
       items: JSON.parse(localStorage.getItem('techInventory') || '[]'),
       sites: [],
       rooms: [],
       sheetsUrl: localStorage.getItem('sheetsUrl') || '',
+      dellApiUrl: 'https://YOUR_DEPLOYED_API_URL', // Placeholder - MUST be updated by user
+
       searchTerm: '',
       currentView: 'inventory',
       showAddModal: false,
@@ -42,9 +59,89 @@
     const statuses = ['Available', 'In Use', 'In Repair', 'Retired'];
 
     // Utility functions
+
+    function debounce(func, delay) {
+      let timeoutId;
+      return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          func.apply(this, args);
+        }, delay);
+      };
+    }
     function isValidDellServiceTag(code) {
       // Dell service tags are 7-character alphanumeric (A-Z, 0-9)
-      return /^[a-zA-Z0-9]{7}$/.test(code);
+      return /^[a-zA-Z0-9]{7}$/.test(code.toUpperCase());
+    }
+
+    function isValidHPSerial(code) {
+      // HP serial numbers are typically 10 to 12 alphanumeric characters
+      return /^[a-zA-Z0-9]{10,12}$/.test(code.toUpperCase());
+    }
+
+    function isValidViewSonicSerial(code) {
+      // ViewSonic serial numbers are typically 10 to 12 alphanumeric characters
+      return /^[a-zA-Z0-9]{10,12}$/.test(code.toUpperCase());
+    }
+
+    function isValidJuniperSerial(code) {
+      // Juniper serial numbers are typically 12 alphanumeric characters
+      return /^[a-zA-Z0-9]{12}$/.test(code.toUpperCase());
+    }
+
+    function isValidBrotherSerial(code) {
+      // Brother serial numbers are typically 15 alphanumeric characters
+      return /^[a-zA-Z0-9]{15}$/.test(code.toUpperCase());
+    }
+
+    function isValidAppleSerial(code) {
+      // Apple serial numbers are 12 or 17 alphanumeric characters
+      return /^[a-zA-Z0-9]{12}$|^[a-zA-Z0-9]{17}$/.test(code.toUpperCase());
+    }
+
+    function isValidAcerSerial(code) {
+      // Acer serial numbers are 22 alphanumeric characters or 11/12 digit SNID
+      return /^[a-zA-Z0-9]{22}$|^\d{11,12}$/.test(code.toUpperCase());
+    }
+
+    function isValidCyberPowerSerial(code) {
+      // CyberPower serial numbers are typically 12 or 16 alphanumeric characters
+      return /^[a-zA-Z0-9]{12}$|^[a-zA-Z0-9]{16}$/.test(code.toUpperCase());
+    }
+
+    function isValidMicrosoftSerial(code) {
+      // Microsoft serial numbers are typically 12 or 16 digits/letters
+      return /^[a-zA-Z0-9]{12}$|^[a-zA-Z0-9]{16}$/.test(code.toUpperCase());
+    }
+
+    function isValidLenovoSerial(code) {
+      // Lenovo serial numbers are typically 7 to 10 alphanumeric characters
+      return /^[a-zA-Z0-9]{7,10}$/.test(code.toUpperCase());
+    }
+
+    function isValidCiscoSerial(code) {
+      // Cisco serial numbers are typically 11 alphanumeric characters
+      return /^[a-zA-Z0-9]{11}$/.test(code.toUpperCase());
+    }
+
+    function isValidAPCSerial(code) {
+      // APC serial numbers are typically 13 alphanumeric characters
+      return /^[a-zA-Z0-9]{13}$/.test(code.toUpperCase());
+    }
+
+    function isValidSamsungSerial(code) {
+      // Samsung serial numbers are typically 15 alphanumeric characters
+      return /^[a-zA-Z0-9]{15}$/.test(code.toUpperCase());
+    }
+
+    function isValidVizioSerial(code) {
+      // Vizio serial numbers are typically 14 alphanumeric characters
+      return /^[a-zA-Z0-9]{14}$/.test(code.toUpperCase());
+    }
+
+    function isValidTCLSerial(code) {
+      // TCL serial numbers are typically 14 alphanumeric characters
+      return /^[a-zA-Z0-9]{14}$/.test(code.toUpperCase());
     }
 
     function isClassroom(roomNumber) {
@@ -80,6 +177,888 @@
         minute: '2-digit',
         hour12: true
       });
+    }
+
+    async function lookupDellModel(serviceTag) {
+      if (!serviceTag || !isValidDellServiceTag(serviceTag)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/dell?tag=' + serviceTag;
+      
+      showMessage('Looking up Dell model for ' + serviceTag + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Dell Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('Dell lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Dell API Lookup Error:', error);
+        showMessage('Could not connect to Dell Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupMicrosoftModel(serialNumber) {
+      if (!serialNumber || !isValidMicrosoftSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/microsoft?tag=' + serialNumber;
+      
+      showMessage('Looking up Microsoft model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Microsoft Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Microsoft lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Microsoft API Lookup Error:', error);
+        showMessage('Could not connect to Microsoft Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupAPCModel(serialNumber) {
+      if (!serialNumber || !isValidAPCSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/apc?tag=' + serialNumber;
+      
+      showMessage('Looking up APC model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found APC Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('APC lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('APC API Lookup Error:', error);
+        showMessage('Could not connect to APC Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupCiscoModel(serialNumber) {
+      if (!serialNumber || !isValidCiscoSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/cisco?tag=' + serialNumber;
+      
+      showMessage('Looking up Cisco model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Cisco Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Cisco lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Cisco API Lookup Error:', error);
+        showMessage('Could not connect to Cisco Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupLenovoModel(serialNumber) {
+      if (!serialNumber || !isValidLenovoSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/lenovo?tag=' + serialNumber;
+      
+      showMessage('Looking up Lenovo model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Lenovo Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('Lenovo lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Lenovo API Lookup Error:', error);
+        showMessage('Could not connect to Lenovo Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupAcerModel(serialNumber) {
+      if (!serialNumber || !isValidAcerSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/acer?tag=' + serialNumber;
+      
+      showMessage('Looking up Acer model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Acer Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('Acer lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Acer API Lookup Error:', error);
+        showMessage('Could not connect to Acer Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupAppleModel(serialNumber) {
+      if (!serialNumber || !isValidAppleSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/apple?tag=' + serialNumber;
+      
+      showMessage('Looking up Apple model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Apple Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Apple lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Apple API Lookup Error:', error);
+        showMessage('Could not connect to Apple Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupBrotherModel(serialNumber) {
+      if (!serialNumber || !isValidBrotherSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/brother?tag=' + serialNumber;
+      
+      showMessage('Looking up Brother model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Brother Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Brother lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Brother API Lookup Error:', error);
+        showMessage('Could not connect to Brother Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupCyberPowerModel(serialNumber) {
+      if (!serialNumber || !isValidCyberPowerSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/cyberpower?tag=' + serialNumber;
+      
+      showMessage('Looking up CyberPower model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found CyberPower Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('CyberPower lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('CyberPower API Lookup Error:', error);
+        showMessage('Could not connect to CyberPower Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupJuniperModel(serialNumber) {
+      if (!serialNumber || !isValidJuniperSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/juniper?tag=' + serialNumber;
+      
+      showMessage('Looking up Juniper model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Juniper Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Juniper lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Juniper API Lookup Error:', error);
+        showMessage('Could not connect to Juniper Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupViewSonicModel(serialNumber) {
+      if (!serialNumber || !isValidViewSonicSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/viewsonic?tag=' + serialNumber;
+      
+      showMessage('Looking up ViewSonic model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found ViewSonic Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('ViewSonic lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('ViewSonic API Lookup Error:', error);
+        showMessage('Could not connect to ViewSonic Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupHPModel(serialNumber) {
+      if (!serialNumber || !isValidHPSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/hp?tag=' + serialNumber;
+      
+      showMessage('Looking up HP model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found HP Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('HP lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('HP API Lookup Error:', error);
+        showMessage('Could not connect to HP Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupSamsungModel(serialNumber) {
+      if (!serialNumber || !isValidSamsungSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/samsung?tag=' + serialNumber;
+      
+      showMessage('Looking up Samsung model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Samsung Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Samsung lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Samsung API Lookup Error:', error);
+        showMessage('Could not connect to Samsung Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupVizioModel(serialNumber) {
+      if (!serialNumber || !isValidVizioSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/vizio?tag=' + serialNumber;
+      
+      showMessage('Looking up Vizio model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Vizio Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Vizio lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Vizio API Lookup Error:', error);
+        showMessage('Could not connect to Vizio Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupTCLModel(serialNumber) {
+      if (!serialNumber || !isValidTCLSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/tcl?tag=' + serialNumber;
+      
+      showMessage('Looking up TCL model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found TCL Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('TCL lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('TCL API Lookup Error:', error);
+        showMessage('Could not connect to TCL Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    function showMessage(message, type = 'success') {
+      // Implementation of showMessage function...
+    }
+
+    function syncToSheets() {
+      // Implementation of syncToSheets function...
+    }
+
+    async function loadFromSheets() {
+      // Implementation of loadFromSheets function...
+    }
+
+    function addItem() {
+      // Implementation of addItem function...
+    }
+
+    function editItem() {
+      // Implementation of editItem function...
+    }
+
+    function deleteItem(id) {
+      // Implementation of deleteItem function...
+    }
+
+    function openEditModal(item) {
+      // Implementation of openEditModal function...
+    }
+
+    function resetForm() {
+      // Implementation of resetForm function...
+    }
+
+    function saveSettings() {
+      // Implementation of saveSettings function...
+    }
+
+    function render() {
+      // Implementation of render function...
+    }
+
+    function renderInventoryView(filteredItems) {
+      // Implementation of renderInventoryView function...
+    }
+
+    function renderSettingsView() {
+      // Implementation of renderSettingsView function...
+    }
+
+    function renderScannerModal() {
+      // Implementation of renderScannerModal function...
+    }
+
+    function renderAddModal() {
+      // Implementation of renderAddModal function...
+    }
+
+    function changeView(view) {
+      // Implementation of changeView function...
+    }
+
+    function loadFromSheets() {
+      // Implementation of loadFromSheets function...
+    }
+
+    // Item operations
+    function addItem() {
+      // Implementation of addItem function...
+    }
+
+    function editItem() {
+      // Implementation of editItem function...
+    }
+
+    function deleteItem(id) {
+      // Implementation of deleteItem function...
+    }
+
+    function openEditModal(item) {
+      // Implementation of openEditModal function...
+    }
+
+    function resetForm() {
+      // Implementation of resetForm function...
+    }
+
+    function saveSettings() {
+      // Implementation of saveSettings function...
+    }
+
+    function render() {
+      // Implementation of render function...
+    }
+
+    function renderInventoryView(filteredItems) {
+      // Implementation of renderInventoryView function...
+    }
+
+    function renderSettingsView() {
+      // Implementation of renderSettingsView function...
+    }
+
+    function renderScannerModal() {
+      // Implementation of renderScannerModal function...
+    }
+
+    function renderAddModal() {
+      // Implementation of renderAddModal function...
+    }
+
+    function changeView(view) {
+      // Implementation of changeView function...
+    }
+
+    function loadFromSheets() {
+      // Implementation of loadFromSheets function...
+    }
+
+    // Load saved URL and data on startup
+    if (state.sheetsUrl) {
+      loadFromSheets();
+    }
+
+    // Initial render
+    render();
+
+    // Debounce the render function for search input
+    const debouncedRender = debounce((value) => {
+      state.searchTerm = value;
+      render();
+    }, 300);
+
+    // Expose necessary functions to the global scope for HTML event handlers
+    window.changeView = changeView;
+    window.loadFromSheets = loadFromSheets;
+    window.startCameraScanner = startCameraScanner;
+    window.resetForm = resetForm;
+    window.render = render;
+    window.debouncedRender = debouncedRender;
+    window.openEditModal = openEditModal;
+    window.deleteItem = deleteItem;
+    window.saveSettings = saveSettings;
+    window.closeScannerModal = closeScannerModal;
+    window.addItem = addItem;
+    window.editItem = editItem;
+    window.isValidDellServiceTag = isValidDellServiceTag; // Exposed for manual entry logic
+    window.isValidHPSerial = isValidHPSerial; // Exposed for manual entry logic
+    window.isValidViewSonicSerial = isValidViewSonicSerial; // Exposed for manual entry logic
+    window.isValidJuniperSerial = isValidJuniperSerial; // Exposed for manual entry logic
+    window.isValidCyberPowerSerial = isValidCyberPowerSerial; // Exposed for manual entry logic
+    window.isValidBrotherSerial = isValidBrotherSerial; // Exposed for manual entry logic
+    window.isValidAppleSerial = isValidAppleSerial; // Exposed for manual entry logic
+    window.isValidAcerSerial = isValidAcerSerial; // Exposed for manual entry logic
+    window.isValidLenovoSerial = isValidLenovoSerial; // Exposed for manual entry logic
+    window.isValidCiscoSerial = isValidCiscoSerial; // Exposed for manual entry logic
+    window.isValidAPCSerial = isValidAPCSerial; // Exposed for manual entry logic
+    window.isValidMicrosoftSerial = isValidMicrosoftSerial; // Exposed for manual entry logic
+    window.isValidSamsungSerial = isValidSamsungSerial; // Exposed for manual entry logic
+    window.isValidVizioSerial = isValidVizioSerial; // Exposed for manual entry logic
+    window.isValidTCLSerial = isValidTCLSerial; // Exposed for manual entry logic
+    window.lookupDellModel = lookupDellModel;
+    window.lookupHPModel = lookupHPModel;
+    window.lookupViewSonicModel = lookupViewSonicModel;
+    window.lookupJuniperModel = lookupJuniperModel;
+    window.lookupCyberPowerModel = lookupCyberPowerModel;
+    window.lookupBrotherModel = lookupBrotherModel;
+    window.lookupAppleModel = lookupAppleModel;
+    window.lookupAcerModel = lookupAcerModel;
+    window.lookupLenovoModel = lookupLenovoModel;
+    window.lookupCiscoModel = lookupCiscoModel;
+    window.lookupAPCModel = lookupAPCModel;
+    window.lookupMicrosoftModel = lookupMicrosoftModel;
+    window.lookupSamsungModel = lookupSamsungModel;
+    window.lookupVizioModel = lookupVizioModel;
+    window.lookupTCLModel = lookupTCLModel;
+
+    })();
+  </script>
+</body>
+  <div id="app"></div>
+
+  <script>
+    // Refactored into a modular IIFE to prevent global namespace pollution
+    (function() {
+
+    // State management
+    let state = {
+      items: JSON.parse(localStorage.getItem('techInventory') || '[]'),
+      sites: [],
+      rooms: [],
+      sheetsUrl: localStorage.getItem('sheetsUrl') || '',
+      dellApiUrl: 'https://YOUR_DEPLOYED_API_URL', // Placeholder - MUST be updated by user
+
+      searchTerm: '',
+      currentView: 'inventory',
+      showAddModal: false,
+      showScanner: false,
+      showClassroomsOnly: true,
+      editingItem: null,
+      scannerActive: false,
+      codeReader: null,
+      videoStream: null,
+      formData: {
+        name: '',
+        barcode: '',
+        category: 'Desktop',
+        site: '',
+        room: '',
+        status: 'Available',
+        assignedTo: '',
+        purchaseDate: ''
+      }
+    };
+
+    const categories = ['Desktop', 'TV', 'Laptop', 'Tablet', 'Printer', 'Switch', 'Server', 'UPS', 'Other'];
+    const statuses = ['Available', 'In Use', 'In Repair', 'Retired'];
+
+    // Utility functions
+
+    function debounce(func, delay) {
+      let timeoutId;
+      return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          func.apply(this, args);
+        }, delay);
+      };
+    }
+    function isValidDellServiceTag(code) {
+      // Dell service tags are 7-character alphanumeric (A-Z, 0-9)
+      return /^[a-zA-Z0-9]{7}$/.test(code.toUpperCase());
+    }
+
+    function isValidHPSerial(code) {
+      // HP serial numbers are typically 10 to 12 alphanumeric characters
+      return /^[a-zA-Z0-9]{10,12}$/.test(code.toUpperCase());
+    }
+
+    function isValidViewSonicSerial(code) {
+      // ViewSonic serial numbers are typically 10 to 12 alphanumeric characters
+      return /^[a-zA-Z0-9]{10,12}$/.test(code.toUpperCase());
+    }
+
+    function isValidJuniperSerial(code) {
+      // Juniper serial numbers are typically 12 alphanumeric characters
+      return /^[a-zA-Z0-9]{12}$/.test(code.toUpperCase());
+    }
+
+    function isValidBrotherSerial(code) {
+      // Brother serial numbers are typically 15 alphanumeric characters
+      return /^[a-zA-Z0-9]{15}$/.test(code.toUpperCase());
+    }
+
+    function isValidAppleSerial(code) {
+      // Apple serial numbers are 12 or 17 alphanumeric characters
+      return /^[a-zA-Z0-9]{12}$|^[a-zA-Z0-9]{17}$/.test(code.toUpperCase());
+    }
+
+    function isValidAcerSerial(code) {
+      // Acer serial numbers are 22 alphanumeric characters or 11/12 digit SNID
+      return /^[a-zA-Z0-9]{22}$|^\d{11,12}$/.test(code.toUpperCase());
+    }
+
+    function isValidCyberPowerSerial(code) {
+      // CyberPower serial numbers are typically 12 or 16 alphanumeric characters
+      return /^[a-zA-Z0-9]{12}$|^[a-zA-Z0-9]{16}$/.test(code.toUpperCase());
+    }
+
+    function isValidMicrosoftSerial(code) {
+      // Microsoft serial numbers are typically 12 or 16 digits/letters
+      return /^[a-zA-Z0-9]{12}$|^[a-zA-Z0-9]{16}$/.test(code.toUpperCase());
+    }
+
+    function isClassroom(roomNumber) {
+      const room = roomNumber.includes(' - ') ? roomNumber.split(' - ')[1] : roomNumber;
+      const excludeKeywords = [
+        'RESTROOM', 'RR', 'STORAGE', 'CUSTODIAL', 'MECHANICAL', 'ELECTRICAL',
+        'IDF', 'MDF', 'CORRIDOR', 'OFFICE', 'CLINIC', 'KITCHEN', 'VESTIBULE',
+        'STAIR', 'ELEVATOR', 'FIRE RISER', 'BOILER', 'RECEPTION', 'ATTENDANCE',
+        'WORKROOM', 'ISS', 'RECORDS', 'SERVICE YARD', 'ENTRY', 'MAIN STREET',
+        'CIRCULATION', 'LOUNGE', 'CHAIR STORAGE', 'GYM STORAGE', 'LOCKERS'
+      ];
+      const roomUpper = room.toUpperCase();
+      return !excludeKeywords.some(keyword => roomUpper.includes(keyword));
+    }
+
+    function getFilteredRooms() {
+      if (!state.formData.site) return [];
+      let filteredRooms = state.rooms.filter(room => room.startsWith(state.formData.site + ' - '));
+      if (state.showClassroomsOnly) {
+        filteredRooms = filteredRooms.filter(room => isClassroom(room));
+      }
+      return filteredRooms.map(room => room.replace(state.formData.site + ' - ', ''));
+    }
+
+    function formatDateTime(isoString) {
+      if (!isoString) return 'N/A';
+      const date = new Date(isoString);
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+
+    async function lookupDellModel(serviceTag) {
+      if (!serviceTag || !isValidDellServiceTag(serviceTag)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/dell?tag=' + serviceTag;
+      
+      showMessage('Looking up Dell model for ' + serviceTag + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Dell Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('Dell lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Dell API Lookup Error:', error);
+        showMessage('Could not connect to Dell Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupMicrosoftModel(serialNumber) {
+      if (!serialNumber || !isValidMicrosoftSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/microsoft?tag=' + serialNumber;
+      
+      showMessage('Looking up Microsoft model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Microsoft Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Microsoft lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Microsoft API Lookup Error:', error);
+        showMessage('Could not connect to Microsoft Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupAPCModel(serialNumber) {      if (!serialNumber || !isValidHPSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/hp?tag=' + serialNumber;
+      
+      showMessage('Looking up HP model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found HP Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('HP lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('HP API Lookup Error:', error);
+        showMessage('Could not connect to HP Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupViewSonicModel(serialNumber) {
+      if (!serialNumber || !isValidViewSonicSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/viewsonic?tag=' + serialNumber;
+      
+      showMessage('Looking up ViewSonic model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found ViewSonic Model: ' + data.model_name, 'success');
+          render();
+        } else {
+          showMessage('ViewSonic lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('ViewSonic API Lookup Error:', error);
+        showMessage('Could not connect to ViewSonic Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupJuniperModel(serialNumber) {
+      if (!serialNumber || !isValidJuniperSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/juniper?tag=' + serialNumber;
+      
+      showMessage('Looking up Juniper model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Juniper Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Juniper lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Juniper API Lookup Error:', error);
+        showMessage('Could not connect to Juniper Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupBrotherModel(serialNumber) {
+      if (!serialNumber || !isValidBrotherSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/brother?tag=' + serialNumber;
+      
+      showMessage('Looking up Brother model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Brother Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Brother lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Brother API Lookup Error:', error);
+        showMessage('Could not connect to Brother Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupAcerModel(serialNumber) {
+      if (!serialNumber || !isValidAcerSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/acer?tag=' + serialNumber;
+      
+      showMessage('Looking up Acer model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Acer Model: ' + data.model_name + '. NOTE: Web scraping may be unreliable.', 'success');
+          render();
+        } else {
+          showMessage('Acer lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Acer API Lookup Error:', error);
+        showMessage('Could not connect to Acer Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupAppleModel(serialNumber) {
+      if (!serialNumber || !isValidAppleSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/apple?tag=' + serialNumber;
+      
+      showMessage('Looking up Apple model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found Apple Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('Apple lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('Apple API Lookup Error:', error);
+        showMessage('Could not connect to Apple Lookup API. Check your API URL in settings.', 'error');
+      }
+    }
+
+    async function lookupCyberPowerModel(serialNumber) {
+      if (!serialNumber || !isValidCyberPowerSerial(serialNumber)) return;
+
+      const apiURL = state.dellApiUrl + '/lookup/cyberpower?tag=' + serialNumber;
+      
+      showMessage('Looking up CyberPower model for ' + serialNumber + '...', 'info');
+
+      try {
+        const response = await fetch(apiURL);
+        const data = await response.json();
+
+        if (data.success) {
+          state.formData.name = data.model_name;
+          showMessage('Found CyberPower Model: ' + data.model_name + '. NOTE: Model is inferred, please verify.', 'success');
+          render();
+        } else {
+          showMessage('CyberPower lookup failed: ' + (data.error || 'Unknown error.'), 'error');
+        }
+      } catch (error) {
+        console.error('CyberPower API Lookup Error:', error);
+        showMessage('Could not connect to CyberPower Lookup API. Check your API URL in settings.', 'error');
+      }
     }
 
     function showMessage(message, type = 'success') {
@@ -131,9 +1110,44 @@
               const scannedCode = result.text;
               stopCameraScanner();
 
-              if (isValidDellServiceTag(scannedCode)) {
-                state.formData.barcode = scannedCode.toUpperCase(); // Convert to uppercase for consistency
-                showMessage('Dell Service Tag scanned: ' + scannedCode.toUpperCase());
+              const tag = scannedCode.toUpperCase();
+              
+              if (isValidDellServiceTag(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('Dell Service Tag scanned: ' + tag);
+                lookupDellModel(tag); // <-- New: Lookup Dell model
+              } else if (isValidHPSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('HP Serial Number scanned: ' + tag);
+                lookupHPModel(tag); // <-- New: Lookup HP model
+              } else if (isValidViewSonicSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('ViewSonic Serial Number scanned: ' + tag);
+                lookupViewSonicModel(tag); // <-- New: Lookup ViewSonic model
+              } else if (isValidJuniperSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('Juniper Serial Number scanned: ' + tag);
+                lookupJuniperModel(tag); // <-- New: Lookup Juniper model
+              } else if (isValidCyberPowerSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('CyberPower Serial Number scanned: ' + tag);
+                lookupCyberPowerModel(tag); // <-- New: Lookup CyberPower model
+              } else if (isValidMicrosoftSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('Microsoft Serial Number scanned: ' + tag);
+                lookupMicrosoftModel(tag); // <-- New: Lookup Microsoft model
+              } else if (isValidSamsungSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('Samsung Serial Number scanned: ' + tag);
+                lookupSamsungModel(tag); // <-- New: Lookup Samsung model
+              } else if (isValidVizioSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('Vizio Serial Number scanned: ' + tag);
+                lookupVizioModel(tag); // <-- New: Lookup Vizio model
+              } else if (isValidTCLSerial(tag)) {
+                state.formData.barcode = tag; 
+                showMessage('TCL Serial Number scanned: ' + tag);
+                lookupTCLModel(tag); // <-- New: Lookup TCL model
               } else {
                 state.formData.barcode = scannedCode;
                 showMessage('Barcode scanned: ' + scannedCode);
@@ -195,10 +1209,10 @@
     }
 
     async function loadFromSheets() {
-	      if (!state.sheetsUrl) {
-	        showMessage('Please configure Google Sheets URL in Settings first', 'error');
-	        return;
-	      }
+      if (!state.sheetsUrl) {
+        showMessage('Please configure Google Sheets URL in Settings first', 'error');
+        return;
+      }
 
       try {
         const response = await fetch(`${state.sheetsUrl}?action=load&timestamp=${Date.now()}`);
@@ -219,10 +1233,10 @@
 
     // Item operations
     function addItem() {
-	      if (!state.formData.name || !state.formData.barcode) {
-	        showMessage('Please fill in name and barcode', 'error');
-	        return;
-	      }
+      if (!state.formData.name || !state.formData.barcode) {
+        showMessage('Please fill in name and barcode', 'error');
+        return;
+      }
 
       const now = new Date().toISOString();
       const location = `${state.formData.site} - ${state.formData.room}`;
@@ -244,10 +1258,10 @@
     }
 
     function editItem() {
-	      if (!state.formData.name || !state.formData.barcode) {
-	        showMessage('Please fill in name and barcode', 'error');
-	        return;
-	      }
+      if (!state.formData.name || !state.formData.barcode) {
+        showMessage('Please fill in name and barcode', 'error');
+        return;
+      }
 
       const now = new Date().toISOString();
       const location = `${state.formData.site} - ${state.formData.room}`;
@@ -312,10 +1326,11 @@
       };
     }
 
-    function saveSettings() {
-      localStorage.setItem('sheetsUrl', state.sheetsUrl);
-      showMessage('Settings saved successfully!');
-    }
+	    function saveSettings() {
+	      localStorage.setItem('sheetsUrl', state.sheetsUrl);
+	      localStorage.setItem('dellApiUrl', state.dellApiUrl); // Save the new API URL
+	      showMessage('Settings saved successfully!');
+	    }
 
     // Render functions
     function render() {
@@ -325,7 +1340,7 @@
         item.barcode.toLowerCase().includes(state.searchTerm.toLowerCase()) ||
         item.location.toLowerCase().includes(state.searchTerm.toLowerCase())
       );
-
+      
       app.innerHTML = `
         <div class="max-w-7xl mx-auto p-4">
           <div class="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -370,11 +1385,11 @@
         <!-- Search and Actions -->
         <div class="flex flex-col md:flex-row gap-4 mb-6">
           <div class="flex-1 relative">
-            <input type="text" 
-              placeholder="Search by name, barcode, or location..." 
-              value="${state.searchTerm}"
-              oninput="state.searchTerm = this.value; render();"
-              class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+	            <input type="text" 
+	              placeholder="Search by name, barcode, or location..." 
+	              value="${state.searchTerm}"
+	              oninput="window.debouncedRender(this.value)"
+	              class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
           </div>
           <button onclick="startCameraScanner()" 
             class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
@@ -442,8 +1457,22 @@
       return `
         <h2 class="text-2xl font-bold text-gray-800 mb-6">Settings</h2>
         
-        <div class="mb-8">
-          <h3 class="text-lg font-semibold text-gray-700 mb-3">Google Sheets Integration</h3>
+	        <div class="mb-8">
+	          <h3 class="text-lg font-semibold text-gray-700 mb-3">Dell Lookup API Integration</h3>
+	          <p class="text-sm text-gray-600 mb-3">Enter the URL for your deployed Dell Service Tag Lookup API (e.g., https://your-api.onrender.com).</p>
+	          <input type="text" 
+	            value="${state.dellApiUrl}"
+	            oninput="state.dellApiUrl = this.value"
+	            placeholder="https://your-api-url.com"
+	            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 mb-3">
+	          <button onclick="saveSettings()" 
+	            class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+	            Save Settings
+	          </button>
+	        </div>
+
+	        <div class="mb-8">
+	          <h3 class="text-lg font-semibold text-gray-700 mb-3">Google Sheets Integration</h3>
           <p class="text-sm text-gray-600 mb-3">Enter your Google Apps Script Web App URL to sync data with Google Sheets.</p>
           <input type="text" 
             value="${state.sheetsUrl}"
@@ -494,26 +1523,57 @@
               <input type="text" id="manualBarcodeInput" 
                 placeholder="Type barcode here" 
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 text-center text-lg">
-	              <button onclick="
-	                const manualCode = document.getElementById('manualBarcodeInput').value.trim();
-	                if (manualCode) {
-	                  stopCameraScanner();
-	                  
-	                  if (isValidDellServiceTag(manualCode)) {
-	                    state.formData.barcode = manualCode.toUpperCase();
-	                    showMessage('Dell Service Tag entered: ' + manualCode.toUpperCase());
-	                  } else {
+              <button onclick="
+                const manualCode = document.getElementById('manualBarcodeInput').value.trim();
+                if (manualCode) {
+                  stopCameraScanner();
+                  
+		                  const tag = manualCode.toUpperCase();
+		                  
+		                  if (isValidDellServiceTag(tag)) {
+		                    state.formData.barcode = tag;
+		                    showMessage('Dell Service Tag entered: ' + tag);
+		                    lookupDellModel(tag); // <-- New: Lookup Dell model
+		                  } else if (isValidHPSerial(tag)) {
+		                    state.formData.barcode = tag;
+		                    showMessage('HP Serial Number entered: ' + tag);
+		                    lookupHPModel(tag); // <-- New: Lookup HP model
+		                  } else if (isValidViewSonicSerial(tag)) {
+		                    state.formData.barcode = tag;
+		                    showMessage('ViewSonic Serial Number entered: ' + tag);
+		                    lookupViewSonicModel(tag); // <-- New: Lookup ViewSonic model
+		                  } else if (isValidJuniperSerial(tag)) {
+		                    state.formData.barcode = tag;
+		                    showMessage('Juniper Serial Number entered: ' + tag);
+		                    lookupJuniperModel(tag); // <-- New: Lookup Juniper model
+} else if (isValidCyberPowerSerial(tag)) {
+			                    state.formData.barcode = tag;
+			                    showMessage('CyberPower Serial Number entered: ' + tag);
+			                    lookupCyberPowerModel(tag); // <-- New: Lookup CyberPower model
+			                  } else if (isValidBrotherSerial(tag)) {
+			                    state.formData.barcode = tag;
+			                    showMessage('Brother Serial Number entered: ' + tag);
+			                    lookupBrotherModel(tag); // <-- New: Lookup Brother model
+			                  } else if (isValidAppleSerial(tag)) {
+			                    state.formData.barcode = tag;
+			                    showMessage('Apple Serial Number entered: ' + tag);
+			                    lookupAppleModel(tag); // <-- New: Lookup Apple model
+			                  } else if (isValidAcerSerial(tag)) {
+			                    state.formData.barcode = tag;
+			                    showMessage('Acer Serial Number/SNID entered: ' + tag);
+			                    lookupAcerModel(tag); // <-- New: Lookup Acer model
+			                  } else {
 	                    state.formData.barcode = manualCode;
 	                    showMessage('Barcode entered successfully!');
 	                  }
 
-	                  state.showScanner = false;
-	                  state.showAddModal = true;
-	                  render();
-	                } else {
-	                  showMessage('Please enter a barcode or service tag', 'error');
-	                }
-	              " class="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                  state.showScanner = false;
+                  state.showAddModal = true;
+                  render();
+                } else {
+                  showMessage('Please enter a barcode or service tag', 'error');
+                }
+              " class="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
                 Use Manual Entry
               </button>
             </div>
@@ -643,6 +1703,39 @@
 
     // Initial render
     render();
+
+    // Debounce the render function for search input
+    const debouncedRender = debounce((value) => {
+      state.searchTerm = value;
+      render();
+    }, 300);
+
+    // Expose necessary functions to the global scope for HTML event handlers
+    window.changeView = changeView;
+    window.loadFromSheets = loadFromSheets;
+    window.startCameraScanner = startCameraScanner;
+    window.resetForm = resetForm;
+    window.render = render;
+    window.debouncedRender = debouncedRender;
+    window.openEditModal = openEditModal;
+    window.deleteItem = deleteItem;
+    window.saveSettings = saveSettings;
+    window.closeScannerModal = closeScannerModal;
+    window.addItem = addItem;
+    window.editItem = editItem;
+    window.isValidDellServiceTag = isValidDellServiceTag; // Exposed for manual entry logic
+    window.isValidHPSerial = isValidHPSerial; // Exposed for manual entry logic
+    window.isValidViewSonicSerial = isValidViewSonicSerial; // Exposed for manual entry logic
+    window.isValidJuniperSerial = isValidJuniperSerial; // Exposed for manual entry logic
+    window.isValidCyberPowerSerial = isValidCyberPowerSerial; // Exposed for manual entry logic
+    window.isValidBrotherSerial = isValidBrotherSerial; // Exposed for manual entry logic
+    window.isValidAppleSerial = isValidAppleSerial; // Exposed for manual entry logic
+    window.isValidAcerSerial = isValidAcerSerial; // Exposed for manual entry logic
+    window.isValidSamsungSerial = isValidSamsungSerial; // Exposed for manual entry logic
+    window.isValidVizioSerial = isValidVizioSerial; // Exposed for manual entry logic
+    window.isValidTCLSerial = isValidTCLSerial; // Exposed for manual entry logic
+
+    })();
   </script>
 </body>
 </html>

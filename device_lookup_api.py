@@ -1,12 +1,160 @@
 import os
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect, url_for, session, send_file
+from flask_session import Session
+from requests_oauthlib import OAuth2Session
+from google_auth_oauthlib.flow import Flow
+import json
+import functools
+import io
 from flask_cors import CORS
 from bs4 import BeautifulSoup
 import re
 
 app = Flask(__name__)
 CORS(app) # Enable CORS for client-side JavaScript access
+
+# --- GOOGLE SSO CONFIGURATION ---
+# NOTE: Replace these with your actual keys and secret key!
+# For security, these should be set as environment variables on Render.
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "YOUR_CLIENT_ID_HERE")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "YOUR_CLIENT_SECRET_HERE")
+GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+
+# Flask Session Configuration
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(24))
+app.config["SESSION_TYPE"] = "filesystem" # Use filesystem for simplicity on Render
+app.config["SESSION_PERMANENT"] = False
+Session(app)
+
+# Google OAuth Scopes
+SCOPES = [
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "openid"
+]
+
+# --- SSO UTILITY FUNCTIONS ---
+
+def get_google_auth_flow():
+    """Initializes the Google OAuth flow."""
+    # The redirect URI is dynamic based on the request, but the path is fixed
+    # We use _scheme='https' to ensure the callback URL is secure, which Google requires
+    redirect_uri = url_for('callback', _external=True, _scheme='https')
+    
+    flow = Flow.from_client_config(
+        client_config={
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "redirect_uris": [redirect_uri],
+                "javascript_origins": [os.environ.get("API_BASE_URL", "")] # Optional, for client-side use
+            }
+        },
+        scopes=SCOPES,
+        redirect_uri=redirect_uri
+    )
+    return flow
+
+def login_required(f):
+    """Decorator to protect routes."""
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_email' not in session:
+            # Redirect to login page
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# --- SSO ROUTES ---
+
+@app.route('/login')
+def login():
+    """Step 1: Redirects user to Google's consent screen."""
+    flow = get_google_auth_flow()
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    session['oauth_state'] = state
+    return redirect(authorization_url)
+
+@app.route('/google/callback')
+def callback():
+    """Step 2: Handles the redirect from Google."""
+    if 'error' in request.args:
+        return f"Login failed: {request.args['error']}", 400
+
+    flow = get_google_auth_flow()
+    
+    try:
+        # Fetch the access token
+        flow.fetch_token(authorization_response=request.url)
+    except Exception as e:
+        return f"Token fetch failed: {e}", 500
+
+    # Get user info
+    credentials = flow.credentials
+    # We need to manually construct the session to get user info
+    google_session = OAuth2Session(GOOGLE_CLIENT_ID, token=credentials.token)
+    user_info = google_session.get('https://www.googleapis.com/oauth2/v1/userinfo').json()
+
+    # CRITICAL: Check if the user is part of the VVISD domain
+    # This assumes your district email is @vvisd.org
+    if not user_info.get('email', '').endswith('@vvisd.org'):
+        return "Access Denied: You must log in with a @vvisd.org account.", 403
+
+    # Store user info in session
+    session['user_email'] = user_info['email']
+    session['user_name'] = user_info.get('name', 'User')
+
+    # Redirect to the main application page
+    return redirect(url_for('serve_app'))
+
+@app.route('/logout')
+def logout():
+    """Clears the session and logs the user out."""
+    session.clear()
+    return "You have been logged out. <a href='/login'>Log in again</a>"
+
+# --- SECURE FILE SERVING ---
+
+@app.route('/')
+@app.route('/app')
+@login_required
+def serve_app():
+    """Serves the index.html file only if the user is logged in."""
+    # The index.html file is now read and served by the server
+    try:
+        # Assuming index.html is in the same directory
+        with open('index.html', 'r') as f:
+            html_content = f.read()
+        
+        # Simple template replacement to show the user's name
+        html_content = html_content.replace(
+            'Van Vleck ISD - Technology Inventory', 
+            f'Van Vleck ISD - Inventory ({session.get("user_name", "Guest")})'
+        )
+        
+        # Inject the base URL of the API into the client-side code
+        # This is CRITICAL because the client-side lookups must now use the server's base URL
+        api_base_url = os.environ.get("API_BASE_URL", request.url_root.rstrip('/'))
+        
+        # The client-side code will be updated to look for this injected value
+        html_content = html_content.replace(
+            "state.dellApiUrl = 'https://YOUR_DEPLOYED_API_URL';",
+            f"state.dellApiUrl = '{api_base_url}';"
+        )
+        
+        return html_content, 200, {'Content-Type': 'text/html'}
+    except FileNotFoundError:
+        return "Error: index.html not found on the server.", 500
+
+# --- PROTECT ALL LOOKUP ROUTES ---
+# We will apply the @login_required decorator to all existing lookup routes below.
 
 # Dell Service Tag validation regex (7-character alphanumeric)
 SERVICE_TAG_REGEX = re.compile(r"^[a-zA-Z0-9]{7}$")
@@ -605,6 +753,7 @@ def get_dell_model_name(service_tag):
 
 
 @app.route('/lookup/dell', methods=['GET'])
+@login_required
 def lookup_dell_service_tag():
     service_tag = request.args.get('tag', '').upper()
     
@@ -631,6 +780,7 @@ def lookup_dell_service_tag():
         }), 404
 
 @app.route('/lookup/tcl', methods=['GET'])
+@login_required
 def lookup_tcl_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -657,6 +807,7 @@ def lookup_tcl_serial_number():
         }), 404
 
 @app.route('/lookup/vizio', methods=['GET'])
+@login_required
 def lookup_vizio_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -683,6 +834,7 @@ def lookup_vizio_serial_number():
         }), 404
 
 @app.route('/lookup/samsung', methods=['GET'])
+@login_required
 def lookup_samsung_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -709,6 +861,7 @@ def lookup_samsung_serial_number():
         }), 404
 
 @app.route('/lookup/microsoft', methods=['GET'])
+@login_required
 def lookup_microsoft_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -735,6 +888,7 @@ def lookup_microsoft_serial_number():
         }), 404
 
 @app.route('/lookup/apc', methods=['GET'])
+@login_required
 def lookup_apc_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -761,6 +915,7 @@ def lookup_apc_serial_number():
         }), 404
 
 @app.route('/lookup/cisco', methods=['GET'])
+@login_required
 def lookup_cisco_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -787,6 +942,7 @@ def lookup_cisco_serial_number():
         }), 404
 
 @app.route('/lookup/lenovo', methods=['GET'])
+@login_required
 def lookup_lenovo_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -813,6 +969,7 @@ def lookup_lenovo_serial_number():
         }), 404
 
 @app.route('/lookup/acer', methods=['GET'])
+@login_required
 def lookup_acer_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -839,6 +996,7 @@ def lookup_acer_serial_number():
         }), 404
 
 @app.route('/lookup/apple', methods=['GET'])
+@login_required
 def lookup_apple_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -865,6 +1023,7 @@ def lookup_apple_serial_number():
         }), 404
 
 @app.route('/lookup/brother', methods=['GET'])
+@login_required
 def lookup_brother_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -891,6 +1050,7 @@ def lookup_brother_serial_number():
         }), 404
 
 @app.route('/lookup/cyberpower', methods=['GET'])
+@login_required
 def lookup_cyberpower_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -917,6 +1077,7 @@ def lookup_cyberpower_serial_number():
         }), 404
 
 @app.route('/lookup/juniper', methods=['GET'])
+@login_required
 def lookup_juniper_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -943,6 +1104,7 @@ def lookup_juniper_serial_number():
         }), 404
 
 @app.route('/lookup/viewsonic', methods=['GET'])
+@login_required
 def lookup_viewsonic_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -969,6 +1131,7 @@ def lookup_viewsonic_serial_number():
         }), 404
 
 @app.route('/lookup/hp', methods=['GET'])
+@login_required
 def lookup_hp_serial_number():
     serial_number = request.args.get('tag', '').upper()
     
@@ -994,11 +1157,13 @@ def lookup_hp_serial_number():
             'error': message
         }), 404
 
-@app.route('/', methods=['GET'])
-def home():
-    return "Inventory Lookup API is running. Endpoints: /lookup/dell?tag=<DELL_TAG>, /lookup/hp?tag=<HP_SERIAL>, /lookup/viewsonic?tag=<VIEWSONIC_SERIAL>, /lookup/juniper?tag=<JUNIPER_SERIAL>, /lookup/cyberpower?tag=<CYBERPOWER_SERIAL>, /lookup/brother?tag=<BROTHER_SERIAL>, /lookup/apple?tag=<APPLE_SERIAL>, /lookup/acer?tag=<ACER_SERIAL>, /lookup/lenovo?tag=<LENOVO_SERIAL>, /lookup/cisco?tag=<CISCO_SERIAL>, /lookup/apc?tag=<APC_SERIAL>, /lookup/microsoft?tag=<MICROSOFT_SERIAL>, /lookup/samsung?tag=<SAMSUNG_SERIAL>, /lookup/vizio?tag=<VIZIO_SERIAL>, and /lookup/tcl?tag=<TCL_SERIAL>"
+# The home route is now the secure serve_app route.
+# The old home route content is no longer needed but we can keep a simple status check.
+@app.route('/status', methods=['GET'])
+def status():
+    return "Inventory Lookup API is running and secured.""
 
 if __name__ == '__main__':
     # Use environment variable for port, common in hosting environments
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, ssl_context='adhoc') # Use adhoc for local testing over https
