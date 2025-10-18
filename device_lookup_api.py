@@ -1161,7 +1161,7 @@ def lookup_hp_serial_number():
 # The old home route content is no longer needed but we can keep a simple status check.
 @app.route('/status', methods=['GET'])
 def status():
-    return "Inventory Lookup API is running and secured.""
+    return "Inventory Lookup API is running and secured."
 
 if __name__ == '__main__':
     # Use environment variable for port, common in hosting environments
