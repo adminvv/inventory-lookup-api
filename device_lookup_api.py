@@ -17,8 +17,8 @@ CORS(app) # Enable CORS for client-side JavaScript access
 # --- GOOGLE SSO CONFIGURATION ---
 # NOTE: Replace these with your actual keys and secret key!
 # For security, these should be set as environment variables on Render.
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "YOUR_CLIENT_ID_HERE")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "YOUR_CLIENT_SECRET_HERE")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
 
 # Flask Session Configuration
@@ -1161,7 +1161,7 @@ def lookup_hp_serial_number():
 # The old home route content is no longer needed but we can keep a simple status check.
 @app.route('/status', methods=['GET'])
 def status():
-    return "Inventory Lookup API is running and secured."
+    return "Inventory Lookup API is running and secured.""
 
 if __name__ == '__main__':
     # Use environment variable for port, common in hosting environments
